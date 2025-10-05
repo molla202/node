@@ -66,7 +66,7 @@ func main() {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			err := updater(string(cmd.String("token")), string(cmd.String("repo")), cmd.Bool("commit"), cmd.Bool("github-action"))
 			if err != nil {
-				return fmt.Errorf("error running updater: %s", err)
+				return fmt.Errorf("failed to run updater: %s", err)
 			}
 			return nil
 		},
@@ -134,26 +134,25 @@ func updater(token string, repoPath string, commit bool, githubAction bool) erro
 func createCommitMessage(updatedDependencies []VersionUpdateInfo, repoPath string, githubAction bool) error {
 	var repos []string
 	commitTitle := "chore: updated "
-	commitDescription := "Updated dependencies for: \n"
+	commitDescription := "Updated dependencies for: "
 
 	for _, dependency := range updatedDependencies {
 		repo, tag := dependency.Repo, dependency.To
-		commitDescription += repo + " => " + tag + " (" + dependency.DiffUrl + ")" + "\n"
+		commitDescription += repo + " => " + tag + " (" + dependency.DiffUrl + ") "
 		repos = append(repos, repo)
 	}
-	commitDescription = strings.TrimSuffix(commitDescription, "\n")
+	commitDescription = strings.TrimSuffix(commitDescription, " ")
 	commitTitle += strings.Join(repos, ", ")
-	
+
 	if githubAction {
-		commitDescription = "\"" + commitDescription + "\""
-		err := createGitMessageEnv(commitTitle, commitDescription, repoPath)
+		err := writeToGithubOutput(commitTitle, commitDescription, repoPath)
 		if err != nil {
 			return fmt.Errorf("error creating git commit message: %s", err)
 		}
 	} else if !githubAction {
 		cmd := exec.Command("git", "commit", "-am", commitTitle, "-m", commitDescription)
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("error running git commit -m: %s", err)
+			return fmt.Errorf("failed to run git commit -m: %s", err)
 		}
 	}
 	return nil
@@ -164,7 +163,7 @@ func getAndUpdateDependency(ctx context.Context, client *github.Client, dependen
 	if err != nil {
 		return VersionUpdateInfo{}, err
 	}
-	if updatedDependency != (VersionUpdateInfo{}) || dependencies[dependencyType].Tracking == "branch" {
+	if updatedDependency != (VersionUpdateInfo{}) {
 		e := updateVersionTagAndCommit(commit, version, dependencyType, repoPath, dependencies)
 		if e != nil {
 			return VersionUpdateInfo{}, fmt.Errorf("error updating version tag and commit: %s", e)
@@ -256,6 +255,15 @@ func getVersionAndCommit(ctx context.Context, client *github.Client, dependencie
 			return "", "", VersionUpdateInfo{}, fmt.Errorf("error listing commits for "+dependencyType+": %s", err)
 		}
 		commit = *branchCommit[0].SHA
+		if dependencies[dependencyType].Commit != commit {
+			diff := dependencies[dependencyType].Commit + " => " + commit
+			updatedDependency = VersionUpdateInfo{
+				dependencies[dependencyType].Repo,
+				dependencies[dependencyType].Tag,
+				commit,
+				diff,
+			}
+		}
 	}
 
 	if version != nil {
@@ -284,9 +292,8 @@ func updateVersionTagAndCommit(
 func writeToVersionsJson(repoPath string, dependencies Dependencies) error {
 	// formatting json
 	updatedJson, err := json.MarshalIndent(dependencies, "", "	  ")
-	print(dependencies["base_reth_node"].Branch)
 	if err != nil {
-		return fmt.Errorf("error Marshaling dependencies json: %s", err)
+		return fmt.Errorf("error marshaling dependencies json: %s", err)
 	}
 
 	e := os.WriteFile(repoPath+"/versions.json", updatedJson, 0644)
@@ -304,6 +311,10 @@ func createVersionsEnv(repoPath string, dependencies Dependencies) error {
 		repoUrl := generateGithubRepoUrl(dependencies, dependency) + ".git"
 
 		dependencyPrefix := strings.ToUpper(dependency)
+
+		if dependencies[dependency].Tracking == "branch" {
+			dependencies[dependency].Tag = dependencies[dependency].Branch
+		}
 
 		envLines = append(envLines, fmt.Sprintf("export %s_%s=%s",
 			dependencyPrefix, "TAG", dependencies[dependency].Tag))
@@ -331,18 +342,26 @@ func createVersionsEnv(repoPath string, dependencies Dependencies) error {
 	return nil
 }
 
-func createGitMessageEnv(title string, description string, repoPath string) error {
-	file, err := os.Create(repoPath + "/commit_message.env")
+func writeToGithubOutput(title string, description string, repoPath string) error {
+	file := os.Getenv("GITHUB_OUTPUT")
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("error creating git_commit_message.env file: %s", err)
+		return fmt.Errorf("failed to open GITHUB_OUTPUT file: %s", err)
 	}
-	defer file.Close()
+	defer f.Close()
 
-	envString := "export TITLE=" + title + "\nexport DESC=" + description
-	_, err = file.WriteString(envString)
+	titleToWrite := fmt.Sprintf("%s=%s\n", "TITLE", title)
+	_, err = f.WriteString(titleToWrite)
 	if err != nil {
-		return fmt.Errorf("error writing to git_commit_message.env file: %s", err)
+		return fmt.Errorf("failed to write to GITHUB_OUTPUT file: %s", err)
 	}
+
+	descToWrite := fmt.Sprintf("%s=%s\n", "DESC", description)
+	_, err = f.WriteString(descToWrite)
+	if err != nil {
+		return fmt.Errorf("failed to write to GITHUB_OUTPUT file: %s", err)
+	}
+
 	return nil
 }
 

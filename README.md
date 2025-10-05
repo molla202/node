@@ -8,6 +8,7 @@ Base is a secure, low-cost, developer-friendly Ethereum L2 built on Optimism's [
 [![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.base.org/)
 [![Discord](https://img.shields.io/discord/1067165013397213286?label=discord)](https://base.org/discord)
 [![Twitter Base](https://img.shields.io/twitter/follow/Base?style=social)](https://x.com/Base)
+[![Farcaster Base](https://img.shields.io/badge/Farcaster_Base-3d8fcc)](https://farcaster.xyz/base)
 
 ## Quick Start
 
@@ -69,7 +70,7 @@ The following are the hardware specifications we use in production:
 - **Storage**: RAID 0 of all local NVMe drives (`/dev/nvme*`)
 - **Filesystem**: ext4
 
-[!NOTE]
+> [!NOTE]
 To run the node using a supported client, you can use the following command:
 `CLIENT=supported_client docker compose up --build`
  
